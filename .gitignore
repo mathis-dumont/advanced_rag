@@ -114,9 +114,9 @@ env.bak/
 venv.bak/
 temporary_env
 scripts/
-data/input
-data/static
-data/vector_store
+data/input/
+data/static/
+data/vector_store/
 
 # Spyder project settings
 .spyderproject

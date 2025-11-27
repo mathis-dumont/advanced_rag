@@ -57,7 +57,7 @@ Le système suit un pipeline RAG classique en plusieurs étapes :
 Le projet suit une structure `src-layout` pour une séparation nette entre le code source et les autres fichiers.
 
 ```
-DID.SIMO.AI_AGENT_EDITOR/
+
 ├── data/
 │   ├── input/                # Placez vos documents .doc/.docx ici
 │   ├── static/                   # Fichiers PDF générés pour l'accès web

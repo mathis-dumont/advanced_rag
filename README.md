@@ -1,126 +1,149 @@
-# Assistant Technique RAG avec Interface Streamlit
+# Advanced Multimodal RAG System
 
-![Python Version](https://img.shields.io/badge/python-3.10+-blue.svg)
+## Project Description
 
-## Description du Projet
+An advanced **multimodal RAG (Retrieval Augmented Generation)** system that processes both text and images from technical documentation. Originally designed for maintenance support, this system demonstrates sophisticated RAG techniques including vision-based image understanding, semantic chunking with contextual windows, and incremental knowledge base updates.
 
-Ce projet implémente un système de Questions-Réponses (QA) de bout en bout, basé sur l'architecture **RAG (Retrieval Augmented Generation)**. Il est conçu pour servir d'assistant technique intelligent pour des agents de maintenance, en répondant à leurs questions en se basant **exclusivement** sur une base de documents techniques fournie (fichiers `.doc` et `.docx`).
+**Key Differentiator**: True multimodal processing with AI-generated image descriptions integrated into the semantic search, enabling retrieval based on visual content alongside text.
 
-Le pipeline complet gère la conversion des documents, l'extraction de texte et la description d'images (approche multimodale), la segmentation sémantique du contenu, la génération d'embeddings vectoriels, l'indexation dans une base de données **FAISS**, et la génération de réponses contextuelles et sourcées via un grand modèle de langage **Mistral**.
+> **Note**: Word document (`.doc`/`.docx`) input was a technical constraint from the original use case. The system converts these to PDF for unified processing.
 
-Le projet propose à la fois une interface en ligne de commande (CLI) pour l'administration et une interface web interactive développée avec **Streamlit**.
+The project provides both a CLI for administration and a Streamlit web interface for end-users.
 
-## Table des Matières
+## Table of Contents
 
-1.  [Description du Projet](#description-du-projet)
-2.  [Architecture et Flux de Données](#architecture-et-flux-de-données)
-3.  [Fonctionnalités Clés](#fonctionnalités-clés)
-4.  [Structure du Projet](#structure-du-projet)
-5.  [Installation et Configuration](#installation-et-configuration)
-6.  [Utilisation](#utilisation)
-7.  [Description Détaillée des Modules](#description-détaillée-des-modules)
-8.  [Concepts RAG Avancés Implémentés](#concepts-rag-avancés-implémentés)
-9.  [Pistes d'Amélioration](#pistes-damélioration)
+1.  [Project Description](#project-description)
+2.  [Advanced RAG Features](#advanced-rag-features)
+3.  [Key Capabilities](#key-capabilities)
+4.  [Installation and Configuration](#installation-and-configuration)
+5.  [Usage](#usage)
+6.  [Project Structure](#project-structure)
+7.  [Technical Implementation](#technical-implementation)
 
-## Architecture et Flux de Données
+## Advanced RAG Features
 
-Le système suit un pipeline RAG classique en plusieurs étapes :
+This implementation goes beyond basic RAG with several sophisticated techniques:
 
-1.  **Ingestion et Prétraitement** (`loaders.py`, `converters.py`): Les documents Word (`.doc`, `.docx`) sont convertis en PDF via LibreOffice. Le texte et les images sont extraits de ces PDF. Un modèle multimodal Mistral génère des descriptions pour les images, qui sont ensuite réinjectées dans le flux textuel pour un contexte enrichi.
+### 1. **Multimodal Processing**
+- **Image extraction** from PDFs using PyMuPDF
+- **AI-powered image description** via Mistral's vision API
+- **Integrated visual context**: Image descriptions are embedded alongside text, enabling semantic search over visual content
+- Parallel processing of multiple images for efficiency
 
-2.  **Segmentation (Chunking)** (`chunking.py`): Le contenu textuel de chaque page est intelligemment divisé en segments (chunks) de taille contrôlée, en utilisant `spaCy` pour respecter les frontières de phrases et `tiktoken` pour un comptage précis des tokens. Un chevauchement (overlap) préserve le contexte entre les chunks.
+### 2. **Semantic Chunking with Context Windows**
+- **Sentence-aware chunking**: Uses spaCy NLP to respect linguistic boundaries
+- **Token-precise control**: tiktoken ensures accurate chunk sizing for LLM context limits
+- **Overlapping chunks**: Configurable overlap preserves context across boundaries
+- **Dynamic context expansion**: Retrieves adjacent chunks (configurable window) to provide broader context to the LLM
 
-3.  **Vectorisation (Embedding)** (`embedding.py`): Chaque chunk est transformé en un vecteur numérique (embedding) via le modèle `mistral-embed`. Ces vecteurs capturent la signification sémantique du texte.
+### 3. **Incremental Knowledge Base Management**
+- **Auto mode**: Automatically detects if rebuild is needed
+- **Rebuild mode**: Complete reindexing from scratch
+- **Incremental mode**: Processes only new documents
+- **Deduplication**: Tracks processed files to avoid redundant work
 
-4.  **Indexation** (`index_manager.py`): Les embeddings sont stockés et indexés dans une base de données vectorielle **FAISS** (optimisée pour la recherche par similarité cosinus) pour une récupération ultra-rapide.
+### 4. **Production-Grade Vector Search**
+- **FAISS optimization**: IndexFlatIP with L2 normalization for cosine similarity
+- **Efficient retrieval**: Sub-millisecond search even with thousands of chunks
+- **Configurable k-NN**: Adjustable number of neighbors for recall/precision tuning
 
-5.  **Récupération (Retrieval)** (`retriever.py`): Lorsqu'un utilisateur pose une question, celle-ci est vectorisée. Le retriever recherche dans l'index FAISS les chunks les plus sémantiquement similaires. Une "fenêtre" de chunks adjacents est également récupérée pour élargir le contexte.
+### 5. **Source Traceability**
+- Every response includes citations with document name and page number
+- Enables verification and fact-checking
+- Maintains trust in AI-generated responses
 
-6.  **Génération** (`pipeline.py`): Les chunks récupérés (le contexte) et la question sont assemblés dans un prompt structuré. Ce prompt est envoyé à un LLM (ex: `mistral-medium`) qui génère une réponse en se basant uniquement sur le contexte fourni.
+## Key Capabilities
 
-7.  **Présentation** (`streamlit_chat.py`, `app.py`): La réponse, enrichie de ses sources, est présentée à l'utilisateur via une interface de chat Streamlit ou en ligne de commande.
+*   **True multimodal RAG**: Processes both text and images from documents
+*   **Production-ready pipeline**: Handles document conversion, chunking, embedding, indexing, and retrieval
+*   **Flexible deployment**: CLI for administration, Streamlit UI for end users
+*   **State-of-the-art models**: Mistral for embeddings, vision, and generation
+*   **Configurable architecture**: JSON-based settings for easy experimentation
+*   **Incremental updates**: Add new documents without rebuilding entire index
 
-## Fonctionnalités Clés
+## Project Structure
 
-*   **Conversion Automatique** des documents `.doc` et `.docx` en PDF.
-*   **Enrichissement Multimodal** avec description automatique des images.
-*   **Chunking Sémantique** intelligent avec respect des phrases et contrôle de la taille des tokens.
-*   **Indexation Vectorielle Performante** avec FAISS.
-*   **Récupération Contextuelle Dynamique** via une "fenêtre" de chunks adjacents.
-*   **Génération de Réponses Sourcées** avec citation automatique des documents et pages.
-*   **Gestion Flexible de la Base de Données** (`auto`, `rebuild`, `incremental`).
-*   **Double Interface** : CLI complète pour l'administration et interface web interactive avec Streamlit.
-*   **Prompt Engineering Avancé** pour des réponses techniques précises et factuelles.
-
-## Structure du Projet
-
-Le projet suit une structure `src-layout` pour une séparation nette entre le code source et les autres fichiers.
+The project follows a `src-layout` structure for clean separation between source code and other files.
 
 ```
 
 ├── data/
-│   ├── input/                # Placez vos documents .doc/.docx ici
-│   ├── static/                   # Fichiers PDF générés pour l'accès web
-│   └── vector_store/         # Base de données vectorielle (créée automatiquement)
+│   ├── input/                # Place your .doc/.docx documents here
+│   ├── static/               # Generated PDF files for web access
+│   └── vector_store/         # Vector database (created automatically)
 ├── src/
-│   ├── rag_agent/            # Paquet principal de l'application RAG
-│   │   ├── components/       # Modules RAG (chunker, retriever...)
-│   │   ├── io/               # Modules d'entrée/sortie (loaders, converters)
+│   ├── rag_agent/            # Main RAG application package
+│   │   ├── components/       # RAG modules (chunker, retriever...)
+│   │   ├── io/               # Input/output modules (loaders, converters)
 │   │   ├── __init__.py
 │   │   ├── config.py
 │   │   └── pipeline.py
-│   ├── app.py                # Point d'entrée de la CLI
-│   └── streamlit_chat.py     # Point d'entrée de l'UI Streamlit
-├── .env                      # Fichier pour les secrets (clé API)
+│   ├── app.py                # CLI entry point
+│   └── streamlit_chat.py     # Streamlit UI entry point
+├── .env                      # File for secrets (API key)
 ├── .gitignore
 ├── README.md
 ├── requirements.txt
-└── settings.json             # Fichier de configuration principal
+└── settings.json             # Main configuration file
 ```
 
-## Installation et Configuration
+## Installation and Configuration
 
-Suivez ces étapes pour mettre en place l'environnement.
+Follow these steps to set up the environment.
 
-### Prérequis
+### Prerequisites
 
-1.  **Python** (version 3.10+ recommandée).
-2.  **LibreOffice** : Doit être installé sur le système.
-    *   Sur Linux (Debian/Ubuntu) : `sudo apt-get install libreoffice`
-    *   Sur macOS/Windows : Installez depuis le site officiel et assurez-vous que l'exécutable `soffice` est dans le PATH de votre système.
+1.  **Python** (version 3.10+ recommended).
+2.  **LibreOffice**: Must be installed on the system.
+    *   On Linux (Debian/Ubuntu): `sudo apt-get install libreoffice`
+    *   On macOS/Windows: Install from the official website and ensure the `soffice` executable is in your system's PATH.
 
-### Étapes d'Installation
+### Installation Steps
 
-1.  **Cloner le dépôt**
+1.  **Clone the repository**
     ```bash
-    git clone <url_du_depot>
-    cd DID.SIMO.AI_AGENT_EDITOR
+    git clone <repository_url>
+    cd advanced_rag_project
     ```
 
-2.  **Créer un environnement virtuel et l'activer**
+2.  **Cadvanced_rag_projectent and activate it**
     ```bash
     python -m venv venv
-    source venv/bin/activate  # Sur Windows: venv\Scripts\activate
+    source venv/bin/activate  # On Windows: venv\Scripts\activate
     ```
 
-3.  **Installer les dépendances Python**
+3.  **Install Python dependencies**
     ```bash
     pip install -r requirements.txt
     ```
 
-4.  **Télécharger le modèle linguistique spaCy**
+4.  **Download the spaCy language model**
     ```bash
     python -m spacy download fr_core_news_md
     ```
 
-5.  **Configurer la Clé API Mistral**
-    Créez un fichier `.env` à la racine du projet et ajoutez votre clé :
+5.  **Configure the Mistral API Key**
+    Create a `.env` file at the project root and add your key:
     ```env
-    MISTRAL_API_KEY="VOTRE_CLE_API_MISTRAL_ICI"
+    MISTRAL_API_KEY=YOUR_MISTRAL_API_KEY_HERE
     ```
+    
+    **Important:** Do not use quotes around the API key value. The key should be written directly without quotes.
 
-6.  **Configurer le Projet**
-    Vérifiez et adaptez si nécessaire le fichier `settings.json` à la racine. La configuration par défaut est conçue pour la structure actuelle du projet.
+6.  **Create data directories and add your documents**
+    ```bash
+    mkdir -p data/input
+    ```
+    
+    **Place your `.doc` or `.docx` documents in `data/input/`**
+    
+    The system will automatically:
+    - Convert them to PDF (stored in `static/`)
+    - Extract text and images
+    - Build the vector database (stored in `data/vector_store/`)
+
+7.  **Configure the Project** (Optional)
+    Check and adapt the `settings.json` file at the root if necessary. The default configuration works out of the box.
     ```json
     {
       "data_dir": "data/input",
@@ -138,76 +161,94 @@ Suivez ces étapes pour mettre en place l'environnement.
     }
     ```
 
-## Utilisation
+## Usage
 
-### Étape 1 : Ajouter des Documents
-Placez vos fichiers `.doc` et `.docx` dans le dossier `data/input/`.
+### Launch the Web Interface (Streamlit)
 
-### Étape 2 : Lancer l'Interface Web (Streamlit)
+1. **Ensure your documents are in `data/input/`**
 
-Pour une expérience stable, lancez toujours l'application avec la commande suivante, qui désactive le "File Watcher" problématique :
+2. **Start the Streamlit app:**
 
 ```bash
 streamlit run src/streamlit_chat.py --server.fileWatcherType none
 ```
 
-Lors du premier lancement, l'application va automatiquement :
--   Convertir vos documents Word en PDF dans le dossier `static/`.
--   Construire la base de données vectorielle dans `data/vector_store/`.
--   Cela peut prendre plusieurs minutes en fonction du volume de documents.
+On first launch, the application will automatically:
+-   Convert your Word documents to PDF
+-   Extract text and images with AI descriptions
+-   Build the vector database
 
-### Étape 3 : Utiliser l'Interface en Ligne de Commande (CLI)
-L'interface en ligne de commande est idéale pour l'administration et les tests.
+This may take a few minutes depending on document volume.
 
-*   **Mode interactif simple :**
+### Command-Line Interface (CLI)
+
+The CLI is ideal for administration, testing, and automation.
+
+*   **Simple interactive mode:**
     ```bash
     python src/app.py
     ```
-*   **Forcer la reconstruction de la base :**
+*   **Force database rebuild:**
     ```bash
     python src/app.py --mode rebuild
     ```
-*   **Mettre à jour la base avec de nouveaux fichiers :**
+*   **Update the database with new files:**
     ```bash
     python src/app.py --mode incremental
     ```
-*   **Poser une question directement :**
+*   **Ask a question directly:**
     ```bash
-    python src/app.py --query "Comment accéder physiquement aux serveurs PDA et WINCC ?"
+    python src/app.py --query "How do I configure the authentication system?"
     ```
 
-## Description Détaillée des Modules
-*(Cette section est basée sur l'excellent travail de votre README original, mise à jour pour refléter l'architecture finale)*
+## Project Structure
 
--   **`src/app.py`** : Point d'entrée de la CLI. Gère les arguments, charge la configuration depuis `settings.json` et orchestre le `RAGPipeline`.
--   **`src/streamlit_chat.py`** : Point d'entrée de l'UI web. Gère la logique d'affichage, la mise en cache des composants, et l'interaction avec le `RAGPipeline`. Utilise `st.session_state` pour gérer les objets lourds (comme le `Chunker`) et éviter les conflits de framework.
--   **`src/rag_agent/pipeline.py`** : Cœur de l'orchestration. La classe `RAGPipeline` connecte tous les composants. Elle gère la logique de construction de la base, la génération des prompts, et la formulation des réponses finales.
--   **`src/rag_agent/io/converters.py`** : Gère la conversion de documents Word en PDF via un appel `subprocess` à LibreOffice (`soffice`).
--   **`src/rag_agent/io/loaders.py`** : Orchestre le chargement des fichiers, leur conversion, et l'extraction de contenu multimodal (texte + descriptions d'images).
--   **`src/rag_agent/components/chunking.py`** : Contient la classe `Chunker` qui segmente le texte en morceaux sémantiquement cohérents et de taille contrôlée.
--   **`src/rag_agent/components/embedding.py`** : Gère la communication avec l'API Mistral pour transformer les chunks de texte en vecteurs.
--   **`src/rag_agent/components/index_manager.py`** : Encapsule toute la logique de création, sauvegarde et chargement de l'index vectoriel FAISS et des métadonnées associées.
--   **`src/rag_agent/components/retriever.py`** : Prend une question, la vectorise et interroge l'index FAISS pour trouver les chunks les plus pertinents.
+```
+├── data/
+│   ├── input/                # Place your .doc/.docx documents here
+│   ├── static/               # Generated PDF files
+│   └── vector_store/         # Vector database (auto-generated)
+├── src/
+│   ├── rag_agent/
+│   │   ├── components/       # Core RAG components
+│   │   │   ├── chunking.py       # Semantic text segmentation
+│   │   │   ├── embedding.py      # Vector generation
+│   │   │   ├── index_manager.py  # FAISS operations
+│   │   │   └── retriever.py      # Similarity search + context windows
+│   │   ├── io/
+│   │   │   ├── converters.py     # Word → PDF conversion
+│   │   │   └── loaders.py        # Multimodal PDF processing
+│   │   ├── config.py         # Configuration management
+│   │   └── pipeline.py       # RAG orchestration
+│   ├── app.py                # CLI interface
+│   └── streamlit_chat.py     # Web interface
+├── .env                      # API keys (not in git)
+├── requirements.txt
+└── settings.json             # Pipeline configuration
+```
 
-## Concepts RAG Avancés Implémentés
-*(Cette section est conservée de votre README original car elle est excellente)*
+## Technical Implementation
 
-Ce projet met en œuvre plusieurs techniques avancées pour améliorer la qualité et la pertinence du système RAG :
+### Multimodal Pipeline
+The system uses Mistral's vision API to generate descriptions of embedded images, which are then integrated into the text chunks before embedding. This allows the vector search to retrieve relevant content based on visual elements, not just text.
 
-1.  **Chunking contextuel avec chevauchement**
-2.  **Gestion multiformat et conversion**
-3.  **Extraction et description d'images (Multimodalité)**
-4.  **Indexation vectorielle optimisée** (FAISS avec `IndexFlatIP` et normalisation L2)
-5.  **Embeddings de pointe** (`mistral-embed`)
-6.  **Fenêtre contextuelle dynamique** pour enrichir le contexte du LLM.
-7.  **Mise à jour incrémentale** de la base de connaissances.
-8.  **Prompt engineering avancé** pour guider le LLM vers des réponses factuelles et techniques.
-9.  **Traçabilité des sources** avec liens cliquables vers les PDF.
+### Contextual Window Retrieval
+Instead of returning isolated chunks, the retriever fetches `k` most similar chunks plus a configurable window of adjacent chunks. This provides the LLM with broader context, improving coherence in responses.
 
-## Pistes d'Amélioration
+### Incremental Indexing
+The system tracks processed files and supports incremental updates, making it practical for evolving document bases without expensive full rebuilds.
 
-1.  **Re-ranking des Chunks** : Intégrer un modèle "cross-encoder" après le retrieval initial pour affiner la pertinence des chunks passés au LLM.
-2.  **Reformulation de la Question** : Utiliser un LLM pour améliorer ou décomposer la question de l'utilisateur avant la recherche vectorielle.
-3.  **Gestion Avancée des Métadonnées** : Extraire des métadonnées (titres, sections, dates) pour permettre un filtrage pendant la recherche.
-4.  **Évaluation Rigoureuse** : Mettre en place un framework d'évaluation (ex: Ragas) pour mesurer objectivement la performance du système.
-5.  **Passage à l'échelle** : Pour des corpus de documents beaucoup plus importants (> 1 Go), remplacer `IndexFlatIP` par des index plus scalables comme `IndexIVF` ou `HNSW`.
+### Production Considerations
+- **Caching**: Heavy objects (spaCy model, Chunker) are cached using Streamlit session state
+- **Error handling**: Comprehensive logging and graceful degradation
+- **Configurability**: All hyperparameters exposed via `settings.json`
+- **Source attribution**: Every response includes document citations
+
+## Future Enhancements
+
+1.  **Hybrid search**: Combine dense (vector) and sparse (BM25) retrieval
+2.  **Reranking**: Add cross-encoder for precision improvement
+3.  **Query expansion**: LLM-based query reformulation
+4.  **Metadata filtering**: Extract and use document structure (sections, headers)
+5.  **Evaluation framework**: Automated quality metrics (RAGAS, BLEU, etc.)
+6.  **Scalable indexing**: HNSW or IVF for larger corpora (>1M chunks)

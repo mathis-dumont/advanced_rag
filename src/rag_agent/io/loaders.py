@@ -1,21 +1,17 @@
+"""Unified PDF processing, description and loading utilities.
+
+This module provides comprehensive PDF document processing including:
+- Text extraction from PDFs
+- Image extraction and AI-based description
+- Word document to PDF conversion
+- Document loading for RAG pipeline
+
+Dependencies:
+    pymupdf, mistralai, python-dotenv, PyPDF2
+"""
 from __future__ import annotations
-"""
-Unified PDF processing, description and loading utilities.
-This single file merges the logic that previously lived in:
-  • pdf_mistral_describer.py
-  • describer_helper.py
-  • loaders.py
-Usage remains identical for external callers – simply import `DocumentLoader` and
-instantiate it with the expected constructor arguments.
 
-Dependencies (install with pip):
-  pymupdf  mistralai  python-dotenv  PyPDF2
-  # plus your own `DocumentConverter` implementation.
-"""
-
-# ---------------------------------------------------------------------------
-# Imports
-# ---------------------------------------------------------------------------
+# Standard library
 import base64
 import concurrent.futures as cf
 import logging
@@ -24,33 +20,27 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
-# Third‑party libs -----------------------------------------------------------
+# Third-party
 import fitz  # PyMuPDF
-from PyPDF2 import PdfReader  # lightweight extraction fallback
+from PyPDF2 import PdfReader
 
 try:
     from mistralai import Mistral
 except ImportError as _err:
-    raise ImportError("La librairie 'mistralai' est requise : pip install mistralai") from _err
+    raise ImportError(
+        "The 'mistralai' library is required. Install with: pip install mistralai"
+    ) from _err
 
-# Optional – load .env for MISTRAL_API_KEY ----------------------------------
 try:
     from dotenv import load_dotenv
-
     load_dotenv()
 except ImportError:
-    # Silently ignore if python‑dotenv absent – user can still export vars.
-    pass
+    pass  # Optional: dotenv not required
 
-# Application‑level logger ---------------------------------------------------
+# Module logger
 logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
 
-# ---------------------------------------------------------------------------
-# Helper MIME utilities
-# ---------------------------------------------------------------------------
+# MIME type utilities
 _MIME_BY_EXT = {
     "jpg": "image/jpeg",
     "jpeg": "image/jpeg",
@@ -62,16 +52,34 @@ _MIME_BY_EXT = {
     "webp": "image/webp",
 }
 
+
 def _guess_mime(ext: str) -> str:
-    """Return a MIME type for the given file extension."""
+    """Return a MIME type for the given file extension.
+    
+    Args:
+        ext: File extension (without dot)
+        
+    Returns:
+        MIME type string
+    """
     return _MIME_BY_EXT.get(ext.lower(), f"image/{ext.lower()}")
 
-# ---------------------------------------------------------------------------
-# 1. Low‑level PDF extraction (text + images)
-# ---------------------------------------------------------------------------
+
+# PDF extraction (text + images)
 
 @dataclass
 class PDFImage:
+    """Represents an image extracted from a PDF.
+    
+    Attributes:
+        page_number: Page number where image appears
+        index_on_page: Image index on the page
+        xref: PDF cross-reference number
+        bytes: Raw image data
+        extension: Image file extension
+        width: Image width in pixels
+        height: Image height in pixels
+    """
     page_number: int
     index_on_page: int
     xref: int
@@ -82,27 +90,42 @@ class PDFImage:
 
 
 class PDFProcessor:
-    """Responsible for extracting native text and raster images from a PDF."""
+    """Extracts native text and raster images from PDF files.
+    
+    This class uses PyMuPDF (fitz) to process PDF documents and extract
+    both textual content and embedded images.
+    """
 
     def __init__(self, pdf_path: str | Path):
+        """Initialize PDF processor.
+        
+        Args:
+            pdf_path: Path to the PDF file
+            
+        Raises:
+            FileNotFoundError: If PDF file doesn't exist
+        """
         self.pdf_path = Path(pdf_path)
         if not self.pdf_path.is_file():
             raise FileNotFoundError(self.pdf_path)
         self.doc = fitz.open(self.pdf_path)
-        logger.info("PDF ouvert : %s (%d pages)", self.pdf_path, len(self.doc))
+        logger.info("Opened PDF: %s (%d pages)", self.pdf_path, len(self.doc))
 
-    # ---- TEXT ------------------------------------------------------------
     def extract_text_per_page(self) -> List[str]:
+        """Extract text from each page.
+        
+        Returns:
+            List of text strings, one per page
+        """
         texts: List[str] = []
         for idx, page in enumerate(self.doc, 1):
             try:
                 texts.append(page.get_text("text", sort=True))
             except Exception as e:
-                logger.warning("Erreur extraction texte page %d : %s", idx, e)
-                texts.append("[Erreur extraction texte]")
+                logger.warning("Error extracting text from page %d: %s", idx, e)
+                texts.append("[Text extraction error]")
         return texts
 
-    # ---- IMAGES ----------------------------------------------------------
     def extract_images_per_page(
         self,
         *,
@@ -110,6 +133,16 @@ class PDFProcessor:
         min_width: int = 0,
         min_height: int = 0,
     ) -> Dict[int, List[PDFImage]]:
+        """Extract images from each page with optional filtering.
+        
+        Args:
+            dedup: If True, deduplicate images by xref across pages
+            min_width: Minimum image width in pixels
+            min_height: Minimum image height in pixels
+            
+        Returns:
+            Dictionary mapping page number to list of PDFImage objects
+        """
         images_by_page: Dict[int, List[PDFImage]] = {}
         seen_xrefs: Set[int] = set()
 
@@ -120,7 +153,7 @@ class PDFProcessor:
                 infos = page.get_image_info(hashes=False, xrefs=True)
             except Exception as e:
                 logger.error(
-                    "Erreur get_image_info page %d : %s", page_number, e, exc_info=True
+                    "Error getting image info for page %d: %s", page_number, e, exc_info=True
                 )
                 continue
 
@@ -139,7 +172,7 @@ class PDFProcessor:
                     img_bytes = img_dict["image"]
                     img_ext = img_dict.get("ext", "bin")
                 except Exception as e:
-                    logger.error("Extraction image xref %d échouée : %s", xref, e)
+                    logger.error("Image extraction failed for xref %d: %s", xref, e)
                     continue
 
                 img_idx += 1
@@ -162,12 +195,12 @@ class PDFProcessor:
 
         return images_by_page
 
-# ---------------------------------------------------------------------------
-# 2. Mistral multimodal captioning helper
-# ---------------------------------------------------------------------------
 
 class MistralImageDescriber:
-    """Generate a short French caption for an image via Mistral multimodal chat."""
+    """Generates concise descriptions for images using Mistral's multimodal chat API.
+    
+    Uses Mistral's vision capabilities to create objective image captions.
+    """
 
     def __init__(
         self,
@@ -176,13 +209,28 @@ class MistralImageDescriber:
         model: str = "mistral-small-latest",
         temperature: float = 0.1,
     ) -> None:
+        """Initialize the image describer.
+        
+        Args:
+            api_key: Mistral API key
+            model: Model name for vision/multimodal tasks
+            temperature: Sampling temperature (lower = more deterministic)
+        """
         self.client = Mistral(api_key=api_key)
         self.model = model
         self.temperature = temperature
-        self.prompt = "Décris cette image de manière concise et objective en français."
-        logger.info("MistralImageDescriber initialisé avec le modèle %s", model)
+        self.prompt = "Describe this image concisely and objectively in English."
+        logger.info("MistralImageDescriber initialized with model %s", model)
 
     def describe(self, img: PDFImage) -> str:
+        """Generate a text description for an image.
+        
+        Args:
+            img: PDFImage object containing image data
+            
+        Returns:
+            Text description of the image
+        """
         b64_image = base64.b64encode(img.bytes).decode()
         messages = [
             {
@@ -202,17 +250,18 @@ class MistralImageDescriber:
             )
             if resp.choices:
                 return resp.choices[0].message.content.strip()
-            return "<aucune description>"
+            return "<no description>"
         except Exception as e:
-            logger.error("API Mistral erreur : %s", e)
-            return f"<erreur API : {type(e).__name__}>"
+            logger.error("Mistral API error: %s", e)
+            return f"<API error: {type(e).__name__}>"
 
-# ---------------------------------------------------------------------------
-# 3. High‑level orchestration: text + captions per PDF
-# ---------------------------------------------------------------------------
 
 class PDFDescriber:
-    """Handle full text extraction + optional image captioning in parallel."""
+    """Handles full text extraction with optional image captioning in parallel.
+    
+    Orchestrates PDF processing by extracting text and optionally generating
+    AI-based descriptions for embedded images.
+    """
 
     def __init__(
         self,
@@ -228,16 +277,16 @@ class PDFDescriber:
     ) -> None:
         self.processor = PDFProcessor(pdf_path)
         self.process_images = process_images 
-        self.describer: Optional[MistralImageDescriber] = None # Initialiser à None
+        self.describer: Optional[MistralImageDescriber] = None
 
-        if self.process_images: # NOUVEAU: conditionner l'initialisation
+        if self.process_images:
             api_key = os.getenv("MISTRAL_API_KEY")
             if not api_key:
                 logger.warning(
-                    "MISTRAL_API_KEY non définie. Description des images désactivée pour %s.",
+                    "MISTRAL_API_KEY not defined. Image description disabled for %s.",
                     pdf_path
                 )
-                self.process_images = False # Forcer la désactivation si la clé manque
+                self.process_images = False
             else:
                 self.describer = MistralImageDescriber(api_key, model=model)
         self.workers = max(1, workers)
@@ -245,8 +294,12 @@ class PDFDescriber:
         self.min_width, self.min_height = min_width, min_height
         self.output_path = Path(output_path) if output_path else None
 
-    # ---- Build full description -----------------------------------------
     def build_description(self) -> str:
+        """Build full description with text and optional image captions.
+        
+        Returns:
+            Complete text description with embedded image captions
+        """
         texts = self.processor.extract_text_per_page()
         captions: Dict[int, List[Tuple[int, str]]] = {}
 
@@ -266,18 +319,18 @@ class PDFDescriber:
                         try:
                             cap = fut.result()
                         except Exception as e:
-                            cap = f"<erreur thread : {e}>"
+                            cap = f"<thread error: {e}>"
                         captions.setdefault(img.page_number, []).append((img.index_on_page, cap))
 
-        # ---- Assemble ----------------------------------------------------
+        # Assemble final output
         out: List[str] = []
         num_pages = len(texts)
         for p_idx, txt in enumerate(texts, 1):
             out.append(f"=== Page {p_idx}/{num_pages} ===\n")
-            out.append(txt.strip() or "[Aucun texte extrait]")
+            out.append(txt.strip() or "[No text extracted]")
             out.append("")
             if p_idx in captions:
-                out.append("-- Images sur cette page --")
+                out.append("-- Images on this page --")
                 for idx, cap in sorted(captions[p_idx]):
                     out.append(f"[Image {idx}] {cap}")
                 out.append("")
@@ -288,9 +341,6 @@ class PDFDescriber:
             self.output_path.write_text(full, encoding="utf-8")
         return full
 
-# ---------------------------------------------------------------------------
-# 4. Thin helper for callers that only need page‑wise text
-# ---------------------------------------------------------------------------
 
 def run_describer(
     *,
@@ -326,16 +376,13 @@ def run_describer(
         pages.append((page_txt, page_num))
     return pages
 
-# ---------------------------------------------------------------------------
-# 5. High‑level DocumentLoader built on a Word‑>PDF converter
-# ---------------------------------------------------------------------------
 
-# Note: `DocumentConverter` must implement a `to_pdf(Path) -> Path` method.
-from .converters import DocumentConverter  # noqa: E402  (import kept late to avoid cycles)
+# Import kept here to avoid circular imports
+from .converters import DocumentConverter  # noqa: E402
 
 
 class DocumentLoader:
-    """Recursively converts Word docs to PDF then extracts per‑page enriched text."""
+    """Recursively converts Word docs to PDF then extracts per-page enriched text."""
 
     def __init__(
         self,
@@ -353,18 +400,24 @@ class DocumentLoader:
         self.process_images = process_images
         self.pdf_output_dir.mkdir(parents=True, exist_ok=True)
 
-    # ---------------------------------------------------------------------
     def read_pdf_pages(self, pdf_path: Path) -> List[str]:
+        """Extract text from PDF pages using PyPDF2.
+        
+        Args:
+            pdf_path: Path to the PDF file
+            
+        Returns:
+            List of text strings, one per page
+        """
         reader = PdfReader(str(pdf_path))
         return [page.extract_text() or "" for page in reader.pages]
 
-    # ---------------------------------------------------------------------
     def load(self) -> List[Tuple[str, str, int]]:
         """Return [(page_text, pdf_filename, page_number), ...] for *new* docs."""
         docs: List[Tuple[str, str, int]] = []
         new_files = 0
 
-        print(f"🕵️  Recherche de documents dans le dossier : {self.data_dir.resolve()}")
+        print(f"🕵️  Searching for documents in folder: {self.data_dir.resolve()}")
 
         for file in self.data_dir.rglob("*.[dD][oO][cC]*"):
             if file.name in self.processed_files:
@@ -379,7 +432,7 @@ class DocumentLoader:
                 ):
                     docs.append((page_text, pdf.name, page_num))
             except Exception as e:
-                logger.error("%s ignoré (%s)", file.name, e)
+                logger.error("%s ignored (%s)", file.name, e)
 
-        logger.info("✅ %d nouveaux fichiers traités, %d pages extraites", new_files, len(docs))
+        logger.info("✅ %d new files processed, %d pages extracted", new_files, len(docs))
         return docs

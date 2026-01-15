@@ -2,7 +2,7 @@
 
 import logging
 log = logging.getLogger(__name__)
-log.debug(f"Chargement du module '{__name__}' depuis le fichier '{__file__}'")
+log.debug(f"Loading module '{__name__}' from file '{__file__}'")
 
 
 from typing import List, Tuple, Optional
@@ -15,16 +15,16 @@ from .config import Settings
 from .io.converters import DocumentConverter
 from .io.loaders import DocumentLoader
 try:
-    log.debug("Tentative d'import relatif: from .components.chunking import Chunker, Chunk")
+    log.debug("Attempting relative import: from .components.chunking import Chunker, Chunk")
     from .components.chunking import Chunker, Chunk
-    log.info("Import relatif de 'chunking' réussi.")
+    log.info("Relative import of 'chunking' successful.")
 except ImportError as e:
-    log.critical("ÉCHEC de l'import relatif de 'chunking'.", exc_info=True)
+    log.critical("FAILED to perform relative import of 'chunking'.", exc_info=True)
 from .components.embedding import Embedder
 from .components.index_manager import IndexManager
 from .components.retriever import Retriever
 
-# Configuration du logging pour l'ensemble du module
+# Logging configuration for the entire module
 logging.basicConfig(
     level=logging.INFO, 
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -34,18 +34,18 @@ logger = logging.getLogger(__name__)
 class RAGPipeline:
     def __init__(self, settings: Settings, api_key: str):
         """
-        Orchestrateur du pipeline RAG, initialisé via un objet de configuration unique.
+        RAG pipeline orchestrator, initialized via a single configuration object.
 
-        :param settings: Objet Pydantic contenant tous les paramètres.
-        :param api_key: Clé API Mistral.
+        :param settings: Pydantic object containing all parameters.
+        :param api_key: Mistral API key.
         """
         if not api_key:
-            raise ValueError("La clé API Mistral (MISTRAL_API_KEY) est requise pour initialiser le pipeline.")
+            raise ValueError("The Mistral API key (MISTRAL_API_KEY) is required to initialize the pipeline.")
             
         self.settings = settings
-        logger.info("Initialisation du pipeline RAG avec le modèle de chat: %s", self.settings.chat_model)
+        logger.info("Initializing RAG pipeline with chat model: %s", self.settings.chat_model)
         
-        # 1. Initialisation des composants à partir des settings
+        # 1. Initialize components from settings
         self.converter = DocumentConverter(out_dir=self.settings.pdf_output_dir)
         self.loader = DocumentLoader(
             data_dir=self.settings.data_dir,
@@ -54,18 +54,18 @@ class RAGPipeline:
             process_images=self.settings.process_images
         )
 
-        # L'Embedder utilise maintenant son propre paramètre
+        # The Embedder now uses its own parameter
         self.embedder = Embedder(api_key=api_key, model=self.settings.embedding_model)
         
-        # Déterminer la dimension des embeddings de manière sûre
+        # Safely determine embedding dimensions
         try:
-            logger.debug("Test de l'API d'embedding pour déterminer la dimension...")
+            logger.debug("Testing embedding API to determine dimension...")
             test_embedding = self.embedder.embed_texts(["test"])[0]
             embedding_dim = len(test_embedding)
-            logger.info("Dimension des embeddings détectée : %d", embedding_dim)
+            logger.info("Detected embedding dimension: %d", embedding_dim)
         except Exception as e:
-            logger.error("Impossible de déterminer la dimension des embeddings via l'API. Erreur: %s", e, exc_info=True)
-            raise ConnectionError("Échec de la communication avec l'API Mistral pour les embeddings.") from e
+            logger.error("Unable to determine embedding dimension via API. Error: %s", e, exc_info=True)
+            raise ConnectionError("Failed to communicate with Mistral API for embeddings.") from e
             
         self.index_mgr = IndexManager(db_dir=self.settings.db_dir, dim=embedding_dim)
         self.retriever = Retriever(
@@ -78,28 +78,28 @@ class RAGPipeline:
 
     def build_or_update(self, chunker, mode: str = "auto") -> Tuple[faiss.Index, list]:
         """
-        Crée ou met à jour la base d'embeddings.
+        Creates or updates the embeddings database.
 
-        :param mode: 'auto', 'rebuild' ou 'incremental'
+        :param mode: 'auto', 'rebuild' or 'incremental'
         :return: (index, chunks)
         """
         if mode == "auto":
             try:
-                logger.info("Mode 'auto' : tentative de chargement de l'index existant.")
+                logger.info("Mode 'auto': attempting to load existing index.")
                 return self.index_mgr.load()
             except FileNotFoundError:
-                logger.warning("Aucun index trouvé. Passage en mode 'rebuild'.")
+                logger.warning("No index found. Switching to 'rebuild' mode.")
                 mode = "rebuild"
 
         if mode == "rebuild":
-            logger.info("Mode 'rebuild' : reconstruction complète de l'index.")
+            logger.info("Mode 'rebuild': complete index reconstruction.")
             docs = self.loader.load()
             if not docs:
-                logger.warning("Aucun document trouvé à traiter. Un index vide sera créé.")
+                logger.warning("No documents found to process. An empty index will be created.")
                 empty_index = faiss.IndexFlatIP(self.index_mgr.dim)
                 return empty_index, []
             
-            logger.debug("Corpus de %d pages de documents chargé. Prêt pour le chunking.", len(docs))
+            logger.debug("Loaded corpus of %d document pages. Ready for chunking.", len(docs))
             chunks = chunker.chunk_all(docs)
             texts = [c.text for c in chunks]
             vectors = self.embedder.embed_texts(texts)
@@ -108,7 +108,7 @@ class RAGPipeline:
             return index, chunks
 
         if mode == "incremental":
-            logger.info("Mode 'incremental' : ajout de nouveaux documents à l'index.")
+            logger.info("Mode 'incremental': adding new documents to index.")
             try:
                 index, existing_chunks = self.index_mgr.load()
                 processed_files = {c.file for c in existing_chunks}
@@ -116,86 +116,86 @@ class RAGPipeline:
                 
                 new_docs = self.loader.load()
                 if not new_docs:
-                    logger.info("Aucun nouveau document à ajouter.")
+                    logger.info("No new documents to add.")
                     return index, existing_chunks
                 
-                logger.info("Traitement de %d nouveaux documents.", len(new_docs))
+                logger.info("Processing %d new documents.", len(new_docs))
                 new_chunks = chunker.chunk_all(new_docs)
                 new_vectors = self.embedder.embed_texts([c.text for c in new_chunks])
                 faiss.normalize_L2(new_vectors)
 
-                # Utiliser index.add() pour une mise à jour efficace
+                # Use index.add() for efficient update
                 index.add(new_vectors)
                 all_chunks = existing_chunks + new_chunks
                 self.index_mgr.save(index, all_chunks)
-                logger.info("Index mis à jour avec %d nouveaux chunks. Total : %d", len(new_chunks), len(all_chunks))
+                logger.info("Index updated with %d new chunks. Total: %d", len(new_chunks), len(all_chunks))
                 return index, all_chunks
 
             except FileNotFoundError:
-                logger.warning("Index existant non trouvé pour le mode incrémental. Forçage du 'rebuild'.")
+                logger.warning("Existing index not found for incremental mode. Forcing 'rebuild'.")
                 return self.build_or_update(mode="rebuild")
             except Exception as e:
-                logger.error("Erreur en mode incrémental: %s. Forçage du 'rebuild'.", e, exc_info=True)
+                logger.error("Error in incremental mode: %s. Forcing 'rebuild'.", e, exc_info=True)
                 return self.build_or_update(mode="rebuild")
 
-        raise ValueError(f"Mode inconnu: {mode}")
+        raise ValueError(f"Unknown mode: {mode}")
 
     def _make_prompt(self, passages: List[str], question: str) -> str:
-        """Construit le prompt pour le modèle de chat."""
+        """Builds the prompt for the chat model."""
         context = "\n---------------------\n".join(passages)
         prompt = f"""
-            SI TU LIS DES INFORMATIONS CONFIDENTIELLES (MDP) IGNORE LES ET N'EN PARLE SURTOUT PAS DANS TA REPONSE, FAIS COMME SI TU NE LES AVAIS JAMAIS VUES
-            Les informations contextuelles sont ci-dessous.
+            IF YOU READ CONFIDENTIAL INFORMATION (PASSWORDS) IGNORE IT AND DO NOT MENTION IT IN YOUR RESPONSE, ACT AS IF YOU NEVER SAW IT
+            The contextual information is provided below.
             
             {context}
             
-            Tu es un assistant technique spécialisé pour les agents de maintenance. Ton rôle est de fournir des informations précises et pratiques en te basant exclusivement sur la documentation technique fournie dans le contexte ci-dessus.
-            SI TU LIS DES INFORMATIONS CONFIDENTIELLES (MDP) IGNORE LES ET N'EN PARLE SURTOUT PAS DANS TA REPONSE, FAIS COMME SI TU NE LES AVAIS JAMAIS VUES
+            You are a technical assistant specialized for maintenance agents. Your role is to provide accurate and practical information based exclusively on the technical documentation provided in the context above.
+            IF YOU READ CONFIDENTIAL INFORMATION (PASSWORDS) IGNORE IT AND DO NOT MENTION IT IN YOUR RESPONSE, ACT AS IF YOU NEVER SAW IT
             Instructions:
-            1. Utilise uniquement les informations du contexte, jamais tes connaissances générales.
-            2. Si l'information n'est pas présente dans le contexte, indique clairement que cette information n'est pas disponible dans la documentation technique actuelle.
-            3. Réponds de façon pratique, détaillée et applicable sur le terrain.
-            4. Structure ta réponse avec des étapes claires si la question concerne une procédure ou un dépannage.
-            5. Mentionne les outils nécessaires, les précautions de sécurité et les points critiques quand c'est pertinent.
-            6. N'invente aucune information qui ne serait pas présente dans le contexte.
+            1. Use only the information from the context, never your general knowledge.
+            2. If the information is not present in the context, clearly indicate that this information is not available in the current technical documentation.
+            3. Respond in a practical, detailed manner that is applicable in the field.
+            4. Structure your response with clear steps if the question concerns a procedure or troubleshooting.
+            5. Mention the necessary tools, safety precautions, and critical points when relevant.
+            6. Do not invent any information that is not present in the context.
             
 
-            Question d'un agent de maintenance: {question}
+            Question from a maintenance agent: {question}
 
-            Réponse technique:
+            Technical response:
         """
         return prompt.strip()
 
     def _append_sources_if_missing(self, answer: str, citations: List[str]) -> str:
         """
-        Ajoute les sources formatées en liens Markdown cliquables à la réponse.
-        Les liens pointent directement vers la bonne page du PDF.
+        Appends formatted sources as clickable Markdown links to the response.
+        Links point directly to the correct PDF page.
         """
         if "Sources :" in answer or "Sources:" in answer:
-            # Si le mot "Sources" est déjà là, on ne fait rien pour éviter les doublons.
+            # If the word "Sources" is already there, do nothing to avoid duplicates.
             return answer
 
-        # On crée des liens uniques et triés
+        # Create unique and sorted links
         unique_citations = sorted(list(dict.fromkeys(citations)))
         links = []
         for cite in unique_citations:
             try:
-                # On sépare le nom du fichier du numéro de page
+                # Separate the file name from the page number
                 docname, page_num_str = cite.rsplit(" p.", 1)
                 page_num = int(page_num_str)
                 
-                # On s'assure que le nom du document se termine bien par .pdf
+                # Ensure the document name ends with .pdf
                 pdf_name = Path(docname).stem + ".pdf"
                 
-                # On construit le lien Markdown
-                # Syntaxe : [Texte à afficher](/url/du/fichier#page=numero)
+                # Build the Markdown link
+                # Syntax: [Display text](/file/url#page=number)
                 link_text = f"{pdf_name} p.{page_num}"
                 url = f"../data/static/{pdf_name}#page={page_num}"
                 
                 links.append(f"[{link_text}]({url})")
 
             except (ValueError, IndexError):
-                # Si le format de la citation est inattendu, on l'affiche telle quelle.
+                # If the citation format is unexpected, display it as is.
                 links.append(f"[{cite}]")
         
         if not links:
@@ -204,19 +204,19 @@ class RAGPipeline:
         return answer + "\n\n**Sources :** " + ", ".join(links)
 
     def answer(self, question: str, chunker, update_mode: str = "auto") -> str:
-        # L'appel à build_or_update doit aussi être corrigé ici !
-        index, _ = self.build_or_update(chunker, mode=update_mode) # On passe chunker en premier
+        # The call to build_or_update must also be corrected here!
+        index, _ = self.build_or_update(chunker, mode=update_mode) # Pass chunker first
         
         if index.ntotal == 0:
-            return "Ma base de connaissances est actuellement vide. Veuillez ajouter des documents et reconstruire l'index."
+            return "My knowledge base is currently empty. Please add documents and rebuild the index."
         
-        logger.info("Recherche des passages pertinents pour la question: '%s'", question)
+        logger.info("Searching for relevant passages for the question: '%s'", question)
         passages, citations = self.retriever.retrieve(question)
         if not passages:
-            return "Désolé, je n'ai trouvé aucune information pertinente dans la documentation pour répondre à votre question."
+            return "Sorry, I found no relevant information in the documentation to answer your question."
 
         prompt = self._make_prompt(passages, question)
-        logger.debug("Prompt envoyé au modèle de chat:\n%s", prompt)
+        logger.debug("Prompt sent to chat model:\n%s", prompt)
         
         resp = self.chat_client.chat.complete(
             model=self.settings.chat_model,

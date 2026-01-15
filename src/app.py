@@ -1,103 +1,117 @@
 # src/app.py
 
 import argparse
-import os
 import logging
+import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
+from rag_agent.components.chunking import Chunker
 from rag_agent.config import load_settings
 from rag_agent.pipeline import RAGPipeline
 
-# Configuration du logging pour l'application CLI
+# Logging configuration for the CLI application
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def main():
-    """Point d'entrée principal pour l'interface en ligne de commande."""
+    """Main entry point for the command-line interface."""
     
-    # Charger les variables d'environnement (ex: MISTRAL_API_KEY) depuis un fichier .env
+    # Load environment variables (e.g., MISTRAL_API_KEY) from a .env file
     load_dotenv()
     
-    # 1. Charger la configuration depuis settings.json
+    # 1. Load configuration from settings.json
     try:
         settings = load_settings(Path("settings.json"))
     except FileNotFoundError as e:
-        logging.error("ERREUR CRITIQUE: %s. Veuillez créer ce fichier.", e)
+        logging.error("CRITICAL ERROR: %s. Please create this file.", e)
         return
 
-    # 2. Gérer les arguments de la ligne de commande
-    parser = argparse.ArgumentParser(description="Système de RAG basé sur des documents.")
+    # 2. Handle command-line arguments
+    parser = argparse.ArgumentParser(description="Document-based RAG system.")
     parser.add_argument(
         "--mode",
         choices=["auto", "rebuild", "incremental"],
         default="auto",
-        help="Mode de mise à jour de la base (auto, rebuild, incremental)."
+        help="Database update mode (auto, rebuild, incremental)."
     )
     parser.add_argument(
         "--convert-only",
         action="store_true",
-        help="Convertir les documents Word en PDF sans construire l'index."
+        help="Convert Word documents to PDF without building the index."
     )
-    parser.add_argument("--query", type=str, help="Question à poser directement.")
+    parser.add_argument("--query", type=str, help="Question to ask directly.")
     parser.add_argument(
         "--process-images",
         action=argparse.BooleanOptionalAction,
         default=settings.process_images,
-        help="Activer/Désactiver le traitement des images par l'IA."
+        help="Enable/Disable AI-based image processing."
     )
     args = parser.parse_args()
 
-    # Mettre à jour les settings avec les arguments de la CLI
+    # Update settings with CLI arguments
     settings.process_images = args.process_images
     
-    # 3. Initialiser le pipeline (logique centralisée et propre)
+    # 3. Initialize the pipeline (centralized and clean logic)
     api_key = os.getenv("MISTRAL_API_KEY")
     if not api_key:
-        logging.error("ERREUR CRITIQUE: La variable d'environnement MISTRAL_API_KEY n'est pas définie.")
+        logging.error("CRITICAL ERROR: The MISTRAL_API_KEY environment variable is not defined.")
         return
         
     try:
         pipeline = RAGPipeline(settings=settings, api_key=api_key)
     except Exception as e:
-        logging.error("Erreur fatale lors de l'initialisation du pipeline: %s", e, exc_info=True)
+        logging.error("Fatal error during pipeline initialization: %s", e, exc_info=True)
         return
 
-    # 4. Exécuter la logique de l'application
+    # Initialize the Chunker
+    chunker = Chunker(
+        nlp_model=settings.nlp_model,
+        token_model=settings.tokenizer_encoding,
+        max_tokens=settings.chunk_max_tokens,
+        overlap=settings.chunk_overlap
+    )
+
+    # 4. Execute application logic
     if args.convert_only:
-        logging.info("Mode 'convert-only' activé.")
-        # La logique de conversion est maintenant gérée par le loader, mais on peut la forcer ici
+        logging.info("'convert-only' mode enabled.")
+        # Conversion logic is now handled by the loader, but we can force it here
         for doc in pipeline.loader.data_dir.rglob("*.[dD][oO][cC]*"):
             try:
                 pdf = pipeline.converter.to_pdf(doc)
-                logging.info(f"✅ Converti : {doc.name} → {pdf.name}")
+                logging.info(f"✅ Converted: {doc.name} → {pdf.name}")
             except Exception as e:
-                logging.error(f"⚠️ Échec conversion {doc.name}: {e}")
+                logging.error(f"⚠️ Conversion failed {doc.name}: {e}")
         return
 
     if args.query:
-        logging.info("Mode 'query' : réponse à une question unique.")
-        réponse = pipeline.answer(args.query, update_mode=args.mode)
-        print("\n--- Réponse ---\n")
-        print(réponse)
+        logging.info("'query' mode: answering a single question.")
+        response = pipeline.answer(args.query, chunker=chunker, update_mode=args.mode)
+        print("\n--- Response ---\n")
+        print(response)
         return
 
-    # Mode interactif par défaut
+    # Default interactive mode
     if args.mode != "auto":
-        pipeline.build_or_update(mode=args.mode)
+        pipeline.build_or_update(chunker=chunker, mode=args.mode)
 
-    print("\n--- Assistant Technique Interactif ---")
-    print("Tapez 'q' ou 'exit' pour quitter.")
+    print("\n--- Interactive Technical Assistant ---")
+    print("Type 'q' or 'exit' to quit.")
     while True:
         try:
             q = input("\nQuestion › ")
             if q.lower() in ("q", "exit", "quit"):
                 break
-            réponse = pipeline.answer(q)
-            print("\n--- Réponse ---\n")
-            print(réponse)
+            response = pipeline.answer(q, chunker=chunker)
+            print("\n--- Response ---\n")
+            print(response)
         except (KeyboardInterrupt, EOFError):
             break
-    print("\nSession terminée.")
+    print("\nSession ended.")
+
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()

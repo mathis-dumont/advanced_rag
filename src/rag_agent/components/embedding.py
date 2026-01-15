@@ -1,40 +1,74 @@
-import numpy as np
+"""Text embedding generation using Mistral API.
+
+This module provides functionality to convert text into vector embeddings
+for semantic similarity search.
+"""
+import logging
 from typing import List
+
+import numpy as np
 from mistralai import Mistral
+
+logger = logging.getLogger(__name__)
 
 
 class Embedder:
+    """Generates embeddings for text using Mistral's embedding models."""
+    
     def __init__(self,
                  api_key: str,
                  model: str = "mistral-embed",
                  batch_size: int = 64):
+        """Initialize the Embedder with API credentials and parameters.
+        
+        Args:
+            api_key: Mistral API key for authentication
+            model: Name of the embedding model to use
+            batch_size: Batch size for API calls (optimizes throughput)
         """
-        :param api_key: clé API pour Mistral
-        :param model: nom du modèle d'embedding
-        :param batch_size: taille des lots pour les appels API
-        """
-        # client Mistral pour les embeddings
         self.client = Mistral(api_key=api_key)
         self.model = model
         self.batch_size = batch_size
+        logger.info("Embedder initialized with model=%s, batch_size=%d", model, batch_size)
 
     def embed_texts(self, texts: List[str]) -> np.ndarray:
-        """
-        Génère les embeddings pour une liste de textes.
-
-        :param texts: liste de chaînes à encoder
-        :return: tableau numpy de dimension (len(texts), dim_embedding)
+        """Generate embeddings for a list of texts.
+        
+        Args:
+            texts: List of text strings to encode
+            
+        Returns:
+            NumPy array of shape (len(texts), embedding_dim) containing embeddings
+            
+        Raises:
+            Exception: If API call fails
         """
         vectors: List[List[float]] = []
-        # traitement par paquets pour optimiser les appels API
+        
+        # Process in batches to optimize API calls
         for i in range(0, len(texts), self.batch_size):
             batch = texts[i : i + self.batch_size]
-            response = self.client.embeddings.create(
-                model=self.model,
-                inputs=batch
-            ).data
-            # extraire les embeddings
-            for d in response:
-                vectors.append(d.embedding)
-        # conversion en numpy array
-        return np.array(vectors, dtype="float32")
+            
+            try:
+                response = self.client.embeddings.create(
+                    model=self.model,
+                    inputs=batch
+                ).data
+                
+                # Extract embeddings from response
+                for d in response:
+                    vectors.append(d.embedding)
+                    
+                logger.debug("Embedded batch %d/%d (%d texts)", 
+                           i // self.batch_size + 1,
+                           (len(texts) + self.batch_size - 1) // self.batch_size,
+                           len(batch))
+            except Exception as e:
+                logger.error("Failed to embed batch starting at index %d: %s", i, e)
+                raise
+        
+        # Convert to NumPy array
+        result = np.array(vectors, dtype="float32")
+        logger.info("Generated embeddings for %d texts (dimension=%d)", 
+                   len(texts), result.shape[1] if result.size > 0 else 0)
+        return result
